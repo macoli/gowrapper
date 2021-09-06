@@ -1,37 +1,37 @@
-package redisfunc
+package redis
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/macoli/iwrapper/slice"
-
-	"github.com/go-redis/redis/v8"
 )
 
-// FormatClusterNodes 执行 cluster nodes 命令并格式化结果
-func FormatClusterNodes(addr, password string) (ClusterNodes []*ClusterNode, err error) {
-	// 初始化 redis 连接
-	var rc *redis.Client
-	rc, err = InitStandRedis(addr, password)
-	if err != nil {
-		return nil, err
-	}
-	defer rc.Close()
+// ========================================cluster info format==========================================
 
-	// 执行 cluster nodes 命令
-	var ret string
-	ret, err = rc.ClusterNodes(ctx).Result()
-	if err != nil {
-		errMsg := fmt.Sprintf("%s 执行命令: cluster nodes 失败, err:%v\n", addr, err)
-		return nil, errors.New(errMsg)
-	}
-	ret = strings.Trim(ret, "\n") // 去掉首尾的换行符
+type ClusterNode struct {
+	ID          string   // 当前节点 ID
+	Addr        string   // 当前节点地址(ip:port)
+	ClusterPort string   // 当前节点和集群其他节点通信端口(默认为节点端口+1000),3.x 版本不展示该信息
+	Flags       []string // 当前节点标志:myself, master, slave, fail?, fail, handshake, noaddr, nofailover, noflags
+	MasterID    string   // 如果当前节点是 slave,这里就是 对应 master 的 ID,如果当前节点是 master,以"-"表示
+	PingSent    int64    // 最近一次发送ping的时间，这个时间是一个unix毫秒时间戳，0代表没有发送过
+	PongRecv    int64    // 最近一次收到pong的时间，使用unix时间戳表示
+	ConfigEpoch int64    // 节点的epoch值.每当节点发生失败切换时，都会创建一个新的，独特的，递增的epoch。如果多个节点竞争同一个哈希槽时，epoch值更高的节点会抢夺到。
+	LinkState   string   // node-to-node集群总线使用的链接的状态: connected或disconnected
+	Slots       []string // 哈希槽值或者一个哈希槽范围
+}
+
+// getNodes 格式化 cluster nodes 命令返回的结果
+func getNodes(nodesStr string) (nodes []*ClusterNode, err error) {
+	nodesStr = strings.Trim(nodesStr, "\n") // 去掉首尾的换行符
 
 	// 按换行符切割,并对每行格式化为 ClusterNode
-	for _, item := range strings.Split(ret, "\n") {
+	for _, item := range strings.Split(nodesStr, "\n") {
 		node := &ClusterNode{}
 		fields := strings.Split(item, " ")
 		node.ID = fields[0]
@@ -66,15 +66,31 @@ func FormatClusterNodes(addr, password string) (ClusterNodes []*ClusterNode, err
 			node.Slots = fields[8:]
 		}
 
-		ClusterNodes = append(ClusterNodes, node)
+		nodes = append(nodes, node)
 	}
 
 	return
 }
 
-// FormatClusterInfo 获取集群节点信息,生成结构体 ClusterInfo
-func FormatClusterInfo(addr, password string) (data *ClusterInfo, err error) {
-	var ClusterNodes []*ClusterNode
+type MasterSlaveMap struct {
+	MasterID   string
+	MasterAddr string
+	SlaveAddr  string
+	SlaveID    string
+	SlotStr    string
+}
+
+type ClusterInfo struct {
+	ClusterNodes    []*ClusterNode
+	MasterSlaveMaps []*MasterSlaveMap
+	Masters         []string
+	Slaves          []string
+	IDToAddr        map[string]string
+	AddrToID        map[string]string
+}
+
+// ClusterInfoFormat 通过cluster nodes 命令返回的结果,格式化为自定义的结构体数据 ClusterInfo
+func ClusterInfoFormat(nodeStr string) (data *ClusterInfo, err error) {
 	var MasterSlaveMaps []*MasterSlaveMap
 	var MasterAddrs []string
 	var SlaveAddrs []string
@@ -82,7 +98,7 @@ func FormatClusterInfo(addr, password string) (data *ClusterInfo, err error) {
 	AddrToID := make(map[string]string)
 
 	// 获取集群 nodes 信息
-	ClusterNodes, err = FormatClusterNodes(addr, password)
+	ClusterNodes, err := getNodes(nodeStr)
 	if err != nil {
 		return nil, err
 	}
@@ -150,15 +166,19 @@ func FormatClusterInfo(addr, password string) (data *ClusterInfo, err error) {
 	return
 }
 
-// CheckClusterConfig 校验集群配置项是否一致
-func CheckClusterConfig(addrSlice []string, password, configArg string) (bool, error) {
+// =================================cluster config=================================================
+
+// ClusterConfigCheck 校验集群配置项是否一致
+func ClusterConfigCheck(addrSlice []string, password, configArg string) (bool, error) {
 	var retValue string
 	for _, addr := range addrSlice {
 		// 创建 redis 连接
-		rc, err := InitStandRedis(addr, password)
+		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return false, err
 		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 		// 获取配置项
 		argRet, err := rc.ConfigGet(ctx, configArg).Result()
@@ -172,23 +192,26 @@ func CheckClusterConfig(addrSlice []string, password, configArg string) (bool, e
 		} else {
 			retValue = argRet[1].(string)
 		}
+
+		cancel()
 		rc.Close()
 	}
 	return true, nil
 }
 
-// ClusterGetConfig 获取集群配置并校验是否一致
-func ClusterGetConfig(addrSlice []string, password, configArg string) (ret string, err error) {
+// ClusterConfigGet 获取集群配置并校验是否一致
+func ClusterConfigGet(addrSlice []string, password, configKey string) (ret string, err error) {
 	for _, addr := range addrSlice {
 		// 连接 redis
-		rc, err := InitStandRedis(addr, password)
+		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return "", err
 		}
 
-		argRet, err := rc.ConfigGet(ctx, configArg).Result()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		argRet, err := rc.ConfigGet(ctx, configKey).Result()
 		if err != nil {
-			errMsg := fmt.Sprintf("获取集群配置项 %s 失败, err:%v\n", configArg, err)
+			errMsg := fmt.Sprintf("获取集群配置项 %s 失败, err:%v\n", configKey, err)
 			return "", errors.New(errMsg)
 		}
 		retValue := argRet[1].(string)
@@ -198,49 +221,69 @@ func ClusterGetConfig(addrSlice []string, password, configArg string) (ret strin
 		} else {
 			ret = retValue
 		}
+
+		cancel()
 		rc.Close()
 	}
 	return
 }
 
-// ClusterSetConfig 批量设置集群配置
-func ClusterSetConfig(addrSlice []string, password, configArg, setValue string) (err error) {
+// ClusterConfigSet 批量设置集群配置
+func ClusterConfigSet(addrSlice []string, password, configKey, setValue string) (err error) {
+	// 校验集群配置是否一致
+	_, err = ClusterConfigGet(addrSlice, password, configKey)
+	if err != nil {
+		return err
+	}
+
+	// 批量修改配置
 	for _, addr := range addrSlice {
 		// 连接 redis
-		rc, err := InitStandRedis(addr, password)
+		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return err
 		}
 
-		err = rc.ConfigSet(ctx, configArg, setValue).Err()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = rc.ConfigSet(ctx, configKey, setValue).Err()
 		if err != nil {
-			errMsg := fmt.Sprintf("集群节点设置 %s 的值: %s 失败\n", configArg, setValue)
+			errMsg := fmt.Sprintf("集群节点设置 %s 的值: %s 失败\n", configKey, setValue)
 			return errors.New(errMsg)
 		}
+
+		cancel()
 		rc.Close()
 	}
 	return
 }
 
+// ==================================cluster flush==================================================
+
 // ClusterFLUSHALL 清空整个集群所有节点的数据
 func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 	clusterNodes := append(data.Masters, data.Slaves...)
+
+	version3 := 0 // 标志位,用于标识当前集群版本是否是 redis 3.x 版本: 0 表示非 redis 3.x 版本;1 表示是 redis 3.x 版本
 	// 获取cluster-node-timeout配置值
-	ret, err := ClusterGetConfig(clusterNodes, password, "cluster-node-timeout")
+	ret, err := ClusterConfigGet(clusterNodes, password, "cluster-node-timeout")
 	if err != nil {
 		return err
 	}
 
 	for _, addr := range clusterNodes {
 		// 连接 redis
-		rc, err := InitStandRedis(addr, password)
+		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return err
 		}
-		defer rc.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 
 		// 获取 redis 版本
-		infoMap, err := GetInfoMapByAddr(addr, password)
+		infoStr, err := rc.Info(ctx).Result()
+		if err != nil {
+			return err
+		}
+		infoMap, err := InfoMap(infoStr)
 		if err != nil {
 			return err
 		}
@@ -253,10 +296,13 @@ func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 
 		// 针对不同版本的 redis, 执行不同的的清空操作
 		if versionPrefix == 3 { // redis 3.x 版本,清空会堵塞 redis,造成主从切换,需要先调整集群超时时间
-			// 调整将cluster-node-timeout配置项的值为 30 分钟,避免清空 redis 的时候发生主从切换
-			err = ClusterSetConfig(clusterNodes, password, "cluster-node-timeout", ret)
-			if err != nil {
-				return err
+			if version3 == 0 {
+				// 调整将cluster-node-timeout配置项的值为 30 分钟,避免清空 redis 的时候发生主从切换
+				err = ClusterConfigSet(clusterNodes, password, "cluster-node-timeout", "1800")
+				if err != nil {
+					return err
+				}
+				version3 = 1
 			}
 
 			//对每个节点执行 FLUSHALL 命令
@@ -274,11 +320,6 @@ func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 				}
 			}
 
-			// 将cluster-node-timeout配置修改为原来配置的值
-			err = ClusterSetConfig(clusterNodes, password, "cluster-node-timeout", ret)
-			if err != nil {
-				return err
-			}
 		} else if versionPrefix >= 4 { // redis 4 及以上版本,可以执行异步清空
 			//对每个节点执行 FLUSHALL 命令
 			if flushCMD == "FLUSHALL" {
@@ -287,74 +328,19 @@ func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 					errMsg := fmt.Sprintf("执行 FLUSHALL ASYNC 命令失败, err:%v\n", err)
 					return errors.New(errMsg)
 				}
-			} else {
-				err = rc.Do(ctx, flushCMD, "ASYNC").Err()
-				if err != nil {
-					errMsg := fmt.Sprintf("执行 FLUSHALL 的 rename 命令: %s ASYNC 失败, err:%v\n", flushCMD, err)
-					return errors.New(errMsg)
-				}
 			}
 		}
 
-	}
-	return
-}
-
-// CheckClusterState 检查集群状态
-func CheckClusterState(addr, password string) (ret string) {
-	// 获取集群所有节点
-	data, err := FormatClusterInfo(addr, password)
-	if err != nil {
-		errMsg := fmt.Sprintf("获取集群节点信息失败,err:%v\n", err)
-		ret += errMsg
-		return
-	}
-
-	// 检查集群 slot 数量是否为 16384
-	slotCount := 0
-	for _, addr := range data.Masters {
-		slots, err := GetInstanceSlots(data, addr)
-		if err != nil {
-			return
-		}
-		fmt.Printf("%s slots: %d\n", addr, len(slots))
-		slotCount += len(slots)
-	}
-	if slotCount != 16384 {
-		errMsg := fmt.Sprintf("集群 slot 总数不是 16384\n")
-		ret += errMsg
-	} else {
-		ret += fmt.Sprintf("集群 slot 总数为 16384\n")
-	}
-
-	// 检查集群 slot 是否有处于 migrating 或 importing 状态
-	var slotStateErrMsg string
-	for _, addr := range data.Masters {
-		data, err := FormatClusterNodes(addr, password)
-		if err != nil {
-			errMsg := fmt.Sprintf("通过 %s 获取集群节点信息失败, err:%v\n", addr, err)
-			ret += errMsg
-			return
-		}
-
-		for _, node := range data {
-			if _, ok := slice.Find(node.Flags, "myself"); ok {
-				// 判断节点是否有 slot migrating 和 importing 转态
-				if index, ok := slice.Has(node.Slots, "->-"); ok { // migrating
-					errSlot := strings.Split(node.Slots[index], "->-")[0]
-					slotStateErrMsg += fmt.Sprintf("节点 %s 的 slot %s 处于 migrating 状态\n", node.Addr, errSlot)
-					ret += slotStateErrMsg
-				} else if index, ok := slice.Has(node.Slots, "-<-"); ok { // importing
-					errSlot := strings.Split(node.Slots[index], "-<-")[0]
-					slotStateErrMsg += fmt.Sprintf("节点 %s 的 slot %s 处于 importing 状态\n", node.Addr, errSlot)
-					ret += slotStateErrMsg
-				}
+		if version3 == 1 {
+			// 将cluster-node-timeout配置修改为原来配置的值
+			err = ClusterConfigSet(clusterNodes, password, "cluster-node-timeout", ret)
+			if err != nil {
+				return err
 			}
 		}
+
+		cancel()
+		rc.Close()
 	}
-	if len(slotStateErrMsg) == 0 {
-		ret += fmt.Sprintf("集群所有 slot 都没有处于 migrating 或 importing 状态\n")
-	}
-	fmt.Println(ret)
 	return
 }

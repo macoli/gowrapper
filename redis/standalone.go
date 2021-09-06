@@ -1,33 +1,46 @@
-package redisfunc
+package redis
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/macoli/iwrapper/message"
 )
 
-// CheckStand 检查单例 redis状态: 是否能连通;是否读写正常
-func CheckStand(addr, password string) Msg {
+// StandStatusCheck 检查单例 redis状态: 是否能连通;是否读写正常
+func StandStatusCheck(addr, password string) message.Msg {
 	// 创建 redis 连接
-	rc, err := InitStandRedis(addr, password)
+	rc, err := InitStandConn(addr, password)
 	if err != nil {
-		return Msg{
+		return message.Msg{
 			Time:  time.Now().Format("2006-01-02 15:04:05"),
-			Code:  CodeMonitorAddrError,
+			Code:  int64(CodeMonitorAddrError),
 			Title: CodeMonitorAddrError.Message(),
 			Err:   err,
 		}
 	}
 	defer rc.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// 获取 redis 的 info 信息
-	infoMap, err := GetInfoMapByClient(rc)
+	infoStr, err := rc.Info(ctx).Result()
 	if err != nil {
-		return Msg{
+		return message.Msg{
 			Time:  time.Now().Format("2006-01-02 15:04:05"),
-			Code:  CodeMonitorAddrError,
+			Code:  int64(CodeMonitorAddrError),
+			Title: CodeMonitorAddrError.Message(),
+			Err:   err,
+		}
+	}
+	infoMap, err := InfoMap(infoStr)
+	if err != nil {
+		return message.Msg{
+			Time:  time.Now().Format("2006-01-02 15:04:05"),
+			Code:  int64(CodeMonitorAddrError),
 			Title: CodeMonitorAddrError.Message(),
 			Err:   err,
 		}
@@ -39,9 +52,9 @@ func CheckStand(addr, password string) Msg {
 		err := rc.Set(ctx, key, "test", time.Second*30).Err()
 		if err != nil {
 			errMsg := fmt.Sprintf("redis 实例(master) %s 测试写数据失败: %v\n", addr, err)
-			return Msg{
+			return message.Msg{
 				Time:  time.Now().Format("2006-01-02 15:04:05"),
-				Code:  CodeMonitorAddrError,
+				Code:  int64(CodeMonitorAddrError),
 				Title: CodeMonitorAddrError.Message(),
 				Err:   errors.New(errMsg),
 			}
@@ -51,9 +64,9 @@ func CheckStand(addr, password string) Msg {
 		err = rc.Get(ctx, key).Err()
 		if err != nil && err != redis.Nil {
 			errMsg := fmt.Sprintf("redis 实例(master) %s 测试读数据失败: %v\n", addr, err)
-			return Msg{
+			return message.Msg{
 				Time:  time.Now().Format("2006-01-02 15:04:05"),
-				Code:  CodeMonitorAddrError,
+				Code:  int64(CodeMonitorAddrError),
 				Title: CodeMonitorAddrError.Message(),
 				Err:   errors.New(errMsg),
 			}
@@ -64,16 +77,16 @@ func CheckStand(addr, password string) Msg {
 		err = rc.Get(ctx, key).Err()
 		if err != nil && err != redis.Nil {
 			errMsg := fmt.Sprintf("redis 实例(slave) %s 测试读数据失败: %v\n", addr, err)
-			return Msg{
+			return message.Msg{
 				Time:  time.Now().Format("2006-01-02 15:04:05"),
-				Code:  CodeMonitorAddrError,
+				Code:  int64(CodeMonitorAddrError),
 				Title: CodeMonitorAddrError.Message(),
 				Err:   errors.New(errMsg),
 			}
 		}
 	}
-	return Msg{
-		Code:    CodeSuccess,
+	return message.Msg{
+		Code:    int64(CodeSuccess),
 		Title:   CodeSuccess.Message(),
 		Content: fmt.Sprintf("redis 实例 %s 状态正常", addr),
 		Time:    time.Now().Format("2006-01-02 15:04:05"),

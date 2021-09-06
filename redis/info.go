@@ -1,11 +1,11 @@
-package redisfunc
+package redis
 
 import (
 	"strings"
 )
 
-// RedisInfoMap 格式化 redis 的 info 命令返回的字符串信息为 map[string]string
-func RedisInfoMap(info string) (infoMap map[string]string, err error) {
+// InfoMap 格式化 redis 的 info 命令返回的字符串信息为 map[string]string
+func InfoMap(info string) (infoMap map[string]string, err error) {
 	infoMap = make(map[string]string)
 	// 按行分割字符串
 	infoSliceTMP := strings.Split(info, "\r\n")

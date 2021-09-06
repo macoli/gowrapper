@@ -1,4 +1,4 @@
-package redisfunc
+package redis
 
 // 定义一些常见的状态码
 
