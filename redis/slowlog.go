@@ -15,8 +15,8 @@ type SlowLog struct {
 	Time     string
 }
 
-// FormatSlowLog 获取 redis 慢查询并格式化
-func FormatSlowLog(addr string, password string) ([]SlowLog, error) {
+// SlowLogFormat 获取 redis 慢查询并格式化
+func SlowLogFormat(addr string, password string) ([]SlowLog, error) {
 	// 创建 redis 连接
 	rc, err := InitStandConn(addr, password)
 	if err != nil {
