@@ -1,6 +1,6 @@
 package redis
 
-// 定义一些常见的状态码
+// =========================定义一些常见的状态码==========================================
 
 type Code int64
 
@@ -20,10 +20,20 @@ var codeMsgMap = map[Code]string{
 	CodeMonitorClusterError:  "redis 集群状态异常",
 }
 
-func (c Code) Message() string {
+func (c Code) CodeMessage() string {
 	msg, ok := codeMsgMap[c]
 	if !ok {
 		msg = codeMsgMap[CodeSuccess]
 	}
 	return msg
+}
+
+// =================================redis 消息事件定义============================================
+
+type Message struct {
+	Code    Code
+	Title   string
+	Content string
+	Time    string
+	Err     error
 }

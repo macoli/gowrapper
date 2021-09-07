@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/macoli/iwrapper/message"
 )
 
 var sentinelChannels = []string{
@@ -39,10 +37,10 @@ var sentinelChannels = []string{
 }
 
 // SentinelManagerMonitor 监听哨兵节点的 channel 事件
-func SentinelManagerMonitor(addr, password string) {
-	errMsg := message.Msg{
-		Code:  int64(CodeMonitorSentinelError),
-		Title: CodeMonitorSentinelError.Message(),
+func SentinelManagerMonitor(addr, password string, msgChannel chan<- Message) {
+	errMsg := Message{
+		Code:  CodeMonitorSentinelError,
+		Title: CodeMonitorSentinelError.CodeMessage(),
 		Time:  time.Now().Format("2006-01-02 15:04:05"),
 	}
 
@@ -50,7 +48,7 @@ func SentinelManagerMonitor(addr, password string) {
 	rc, err := InitSentinelManagerConn(addr, password)
 	if err != nil {
 		errMsg.Err = err
-		errMsg.Notice()
+		msgChannel <- errMsg
 	}
 	defer rc.Close()
 
@@ -64,7 +62,7 @@ func SentinelManagerMonitor(addr, password string) {
 		tmp := fmt.Sprintf("获取 redis 哨兵节点 %s 的 channel 失败: %v\n", addr, err)
 
 		errMsg.Err = errors.New(tmp)
-		errMsg.Notice()
+		msgChannel <- errMsg
 	}
 	ch := pubSub.Channel()
 
@@ -79,15 +77,15 @@ func SentinelManagerMonitor(addr, password string) {
 				contentTMP[0], contentTMP[1], contentTMP[2], contentTMP[3], contentTMP[4])
 
 			errMsg.Err = errors.New(tmp)
-			errMsg.Notice()
+			msgChannel <- errMsg
 		default: // 其他哨兵事件通知
-			msg := message.Msg{
-				Code:    int64(CodeSuccess),
+			msg := Message{
+				Code:    CodeSuccess,
 				Title:   "redis 哨兵事件提醒",
 				Time:    time.Now().Format("2006-01-02 15:04:05"),
 				Content: fmt.Sprintf("%v %v", m.Channel, m.Payload),
 			}
-			msg.Print()
+			msgChannel <- msg
 		}
 	}
 
