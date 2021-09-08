@@ -17,7 +17,3 @@
 .log/
 .logs/
 *.log
-*.conf
-*.yaml
-*.ini
-*.json
