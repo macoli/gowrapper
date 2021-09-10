@@ -1,4 +1,4 @@
-package redis
+package iredis
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func SlotCheck(slot int64) {
 	}
 }
 
-// SlotsGetByInstance 从 FormatClusterInfo 中获取对应 redis 实例的所有 slot
+// SlotsGetByInstance 从 FormatClusterInfo 中获取对应 iredis 实例的所有 slot
 func SlotsGetByInstance(data *ClusterInfo, addr string) (slots []int64, err error) {
 	// 获取对应 addr 的 slotStr 信息
 	var slotStr string
@@ -82,7 +82,7 @@ func SlotMove(sourceAddr, targetAddr, password string, slots []int64, count int,
 		return err
 	}
 
-	// 函数结束后关闭 redis 连接
+	// 函数结束后关闭 iredis 连接
 	defer sourceClient.Close()
 	defer targetClient.Close()
 
@@ -117,7 +117,7 @@ func SlotMove(sourceAddr, targetAddr, password string, slots []int64, count int,
 		//循环迁移 slot 的数据到目标节点
 		for {
 			ret := sourceClient.ClusterGetKeysInSlot(ctx, int(slot), count) // 从源节点获取 slot 的 key(批量)
-			// 循环将获取的 key 发往目标 redis 实例
+			// 循环将获取的 key 发往目标 iredis 实例
 			for _, key := range ret.Val() {
 				_, err := sourceClient.Migrate(ctx, targetIP, targetPort, key, 0, time.Second*10).Result()
 				if err != nil {
@@ -136,13 +136,13 @@ func SlotMove(sourceAddr, targetAddr, password string, slots []int64, count int,
 		for _, addr := range data.Masters {
 			rc, err := InitStandConn(addr, password)
 			if err != nil {
-				errMsg := fmt.Sprintf("连接 redis: %s 失败, err:%v\n", addr, err)
+				errMsg := fmt.Sprintf("连接 iredis: %s 失败, err:%v\n", addr, err)
 				return errors.New(errMsg)
 			}
 
 			_, err = rc.Do(ctx, "cluster", "setslot", slot, "node", data.AddrToID[targetAddr]).Result()
 			if err != nil {
-				errMsg := fmt.Sprintf("在 redis: %s 上执行命令: cluster setslot 失败, err:%v\n", addr, err)
+				errMsg := fmt.Sprintf("在 iredis: %s 上执行命令: cluster setslot 失败, err:%v\n", addr, err)
 				return errors.New(errMsg)
 			}
 			rc.Close()
