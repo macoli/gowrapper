@@ -1,4 +1,4 @@
-package istring
+package string
 
 import (
 	"math/rand"

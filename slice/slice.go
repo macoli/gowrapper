@@ -1,4 +1,4 @@
-package islice
+package slice
 
 import "strings"
 

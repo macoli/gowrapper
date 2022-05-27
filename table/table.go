@@ -1,4 +1,4 @@
-package itable
+package table
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"github.com/alexeyco/simpletable"
 )
 
-//ShowTable 通过表格展示数据
+// ShowTable 通过表格展示数据
 func ShowTable(headerCells []*simpletable.Cell, bodyCells [][]*simpletable.Cell) {
 	// 新建表格
 	table := simpletable.New()
@@ -24,7 +24,7 @@ func ShowTable(headerCells []*simpletable.Cell, bodyCells [][]*simpletable.Cell)
 	fmt.Println(table.String())
 }
 
-//GetHeaderCells 生成表头
+// GenHeaderCells 生成表头
 func GenHeaderCells(m interface{}) []*simpletable.Cell {
 	t := reflect.TypeOf(m)
 	Cells := []*simpletable.Cell{
@@ -37,7 +37,7 @@ func GenHeaderCells(m interface{}) []*simpletable.Cell {
 	return Cells
 }
 
-//GetBodyCells 生成表数据
+// GenBodyCells 生成表数据
 func GenBodyCells(m []interface{}) [][]*simpletable.Cell {
 	var Cells [][]*simpletable.Cell
 	cnt := 1

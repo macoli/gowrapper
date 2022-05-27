@@ -1,4 +1,4 @@
-module github.com/macoli/iwrapper
+module github.com/macoli/gowrapper
 
 go 1.17
 

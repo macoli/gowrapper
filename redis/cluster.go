@@ -1,4 +1,4 @@
-package iredis
+package redis
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/macoli/iwrapper/islice"
+	"github.com/macoli/gowrapper/slice"
 )
 
 // ========================================cluster info format==========================================
@@ -106,7 +106,7 @@ func ClusterInfoFormat(nodeStr string) (data *ClusterInfo, err error) {
 	// 格式化 ClusterNodes, 生成 ClusterInfo
 	NodeTmpMap := map[string]map[string]string{} // 临时存放主从映射关系 {nodeID:{maasterAddr: xx, ...}}
 	for _, node := range ClusterNodes {
-		if _, ok := islice.Find(node.Flags, "master"); ok { // 角色是 master
+		if _, ok := slice.Find(node.Flags, "master"); ok { // 角色是 master
 			MasterAddrs = append(MasterAddrs, node.Addr)
 			IDToAddr[node.ID] = node.Addr
 			AddrToID[node.Addr] = node.ID
@@ -129,7 +129,7 @@ func ClusterInfoFormat(nodeStr string) (data *ClusterInfo, err error) {
 			NodeTmpMap[node.ID]["SlotStr"] = slotStr
 		}
 
-		if _, ok := islice.Find(node.Flags, "slave"); ok { // 角色是 slave
+		if _, ok := slice.Find(node.Flags, "slave"); ok { // 角色是 slave
 			SlaveAddrs = append(SlaveAddrs, node.Addr)
 			IDToAddr[node.ID] = node.Addr
 			AddrToID[node.Addr] = node.ID
@@ -172,7 +172,7 @@ func ClusterInfoFormat(nodeStr string) (data *ClusterInfo, err error) {
 func ClusterConfigCheck(addrSlice []string, password, configArg string) (bool, error) {
 	var retValue string
 	for _, addr := range addrSlice {
-		// 创建 iredis 连接
+		// 创建 redis 连接
 		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return false, err
@@ -202,7 +202,7 @@ func ClusterConfigCheck(addrSlice []string, password, configArg string) (bool, e
 // ClusterConfigGet 获取集群配置并校验是否一致
 func ClusterConfigGet(addrSlice []string, password, configKey string) (ret string, err error) {
 	for _, addr := range addrSlice {
-		// 连接 iredis
+		// 连接 redis
 		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return "", err
@@ -238,7 +238,7 @@ func ClusterConfigSet(addrSlice []string, password, configKey, setValue string) 
 
 	// 批量修改配置
 	for _, addr := range addrSlice {
-		// 连接 iredis
+		// 连接 redis
 		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return err
@@ -263,7 +263,7 @@ func ClusterConfigSet(addrSlice []string, password, configKey, setValue string) 
 func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 	clusterNodes := append(data.Masters, data.Slaves...)
 
-	version3 := 0 // 标志位,用于标识当前集群版本是否是 iredis 3.x 版本: 0 表示非 iredis 3.x 版本;1 表示是 iredis 3.x 版本
+	version3 := 0 // 标志位,用于标识当前集群版本是否是 redis 3.x 版本: 0 表示非 redis 3.x 版本;1 表示是 redis 3.x 版本
 	// 获取cluster-node-timeout配置值
 	ret, err := ClusterConfigGet(clusterNodes, password, "cluster-node-timeout")
 	if err != nil {
@@ -271,14 +271,14 @@ func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 	}
 
 	for _, addr := range clusterNodes {
-		// 连接 iredis
+		// 连接 redis
 		rc, err := InitStandConn(addr, password)
 		if err != nil {
 			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 
-		// 获取 iredis 版本
+		// 获取 redis 版本
 		infoStr, err := rc.Info(ctx).Result()
 		if err != nil {
 			return err
@@ -294,10 +294,10 @@ func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 			return errors.New(errMsg)
 		}
 
-		// 针对不同版本的 iredis, 执行不同的的清空操作
-		if versionPrefix == 3 { // iredis 3.x 版本,清空会堵塞 iredis,造成主从切换,需要先调整集群超时时间
+		// 针对不同版本的 redis, 执行不同的的清空操作
+		if versionPrefix == 3 { // redis 3.x 版本,清空会堵塞 redis,造成主从切换,需要先调整集群超时时间
 			if version3 == 0 {
-				// 调整将cluster-node-timeout配置项的值为 30 分钟,避免清空 iredis 的时候发生主从切换
+				// 调整将cluster-node-timeout配置项的值为 30 分钟,避免清空 redis 的时候发生主从切换
 				err = ClusterConfigSet(clusterNodes, password, "cluster-node-timeout", "1800")
 				if err != nil {
 					return err
@@ -320,7 +320,7 @@ func ClusterFLUSHALL(data *ClusterInfo, password, flushCMD string) (err error) {
 				}
 			}
 
-		} else if versionPrefix >= 4 { // iredis 4 及以上版本,可以执行异步清空
+		} else if versionPrefix >= 4 { // redis 4 及以上版本,可以执行异步清空
 			//对每个节点执行 FLUSHALL 命令
 			if flushCMD == "FLUSHALL" {
 				err = rc.Do(ctx, "FLUSHALL", "ASYNC").Err()

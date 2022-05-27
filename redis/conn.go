@@ -1,4 +1,4 @@
-package iredis
+package redis
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-//InitStandConn 初始化单例 iredis 连接
+//InitStandConn 初始化单例 redis 连接
 func InitStandConn(addr, password string) (*redis.Client, error) {
 	rc := redis.NewClient(&redis.Options{
 		Addr:        addr,
@@ -24,7 +24,7 @@ func InitStandConn(addr, password string) (*redis.Client, error) {
 
 	_, err := rc.Ping(ctx).Result()
 	if err != nil {
-		errMsg := fmt.Sprintf("iredis 实例 %s 连接失败: %v\n", addr, err)
+		errMsg := fmt.Sprintf("redis 实例 %s 连接失败: %v\n", addr, err)
 		return nil, errors.New(errMsg)
 	}
 	return rc, nil
